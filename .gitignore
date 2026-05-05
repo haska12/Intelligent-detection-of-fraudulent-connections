@@ -1,0 +1,6 @@
+# Ignore UNSW NB15 dataset partial CSV files
+UNSW-NB15_1.csv
+UNSW-NB15_2.csv
+# If these files live in dataset/ subfolder, ignore them there too
+/dataset/UNSW-NB15_1.csv
+/dataset/UNSW-NB15_2.csv

@@ -1,0 +1,157 @@
+services:
+  # ─────────────────────────────────────────
+  # ZOOKEEPER + KAFKA
+  # ─────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  # ─────────────────────────────────────────
+  # HDFS
+  # ─────────────────────────────────────────
+  namenode:
+    image: apache/hadoop:3.3.6
+    container_name: namenode
+    hostname: namenode
+    command: ["hdfs", "namenode"]
+    ports:
+      - "9870:9870"
+      - "9005:9000"
+    env_file:
+      - hadoop.env
+    environment:
+      ENSURE_NAMENODE_DIR: "/tmp/hadoop-root/dfs/name"
+    volumes:
+      - "//d/dxc_project_full:/home/spark_data"
+
+  datanode:
+    image: apache/hadoop:3.3.6
+    container_name: datanode
+    hostname: datanode # Give it a specific hostname
+    command: ["hdfs", "datanode"]
+    depends_on:
+      - namenode
+    ports:
+      - "9864:9864" # DataNode HTTP UI
+      - "9866:9866" # DataNode Data Transfer (Crucial for Spark)
+    env_file:
+      - hadoop.env
+
+  # ─────────────────────────────────────────
+  # SPARK
+  # ─────────────────────────────────────────
+  spark-master:
+    image: apache/spark:3.5.3
+    container_name: spark-master
+    build:
+      context: .
+      dockerfile: ./spark/Dockerfile
+    env_file:
+      - hadoop.env
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+    command: ["/opt/spark/sbin/start-master.sh"]
+    volumes:
+      - "//d/dxc_project_full:/home/spark_data"
+
+  spark-worker:
+    image: apache/spark:3.5.3
+    build:
+      context: .
+      dockerfile: ./spark/Dockerfile
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-master:7077"]
+    volumes:
+      - "//d/dxc_project_full:/home/spark_data"
+
+  # ─────────────────────────────────────────
+  # HIVE METASTORE DATABASE (PostgreSQL)
+  # ─────────────────────────────────────────
+  hive-postgres:
+    image: postgres:15
+    container_name: hive-postgres
+    environment:
+      POSTGRES_DB: metastore_db
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hivepassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - hive-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d metastore_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # HIVE METASTORE
+  # ─────────────────────────────────────────
+  hive-metastore:
+    build: ./hive # ✅ builds custom image with JDBC driver
+    container_name: hive-metastore
+    depends_on:
+      hive-postgres:
+        condition: service_healthy
+      namenode:
+        condition: service_started
+    ports:
+      - "9083:9083"
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      SERVICE_OPTS: >-
+        -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
+        -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://hive-postgres:5432/metastore_db
+        -Djavax.jdo.option.ConnectionUserName=hive
+        -Djavax.jdo.option.ConnectionPassword=hivepassword
+    volumes:
+      - hive-warehouse:/opt/hive/data/warehouse
+
+  # ─────────────────────────────────────────
+  # HIVESERVER2
+  # ─────────────────────────────────────────
+  hiveserver2:
+    build: ./hive # ✅ same custom image
+    container_name: hiveserver2
+    depends_on:
+      - hive-metastore
+    ports:
+      - "10000:10000"
+      - "10002:10002"
+    environment:
+      SERVICE_NAME: hiveserver2
+      IS_RESUME: "true"
+      SERVICE_OPTS: >-
+        -Dhive.metastore.uris=thrift://hive-metastore:9083
+    volumes:
+      - hive-warehouse:/opt/hive/data/warehouse
+
+volumes:
+  hive-postgres-data:
+  hive-warehouse:
