@@ -200,15 +200,35 @@ These endpoints return flat JSON arrays for easy integration with visualization 
 
 ```text
 .
-├── api/
-│   └── main.py              # FastAPI application logic
-├── docker_configuration/    # Docker Compose and service configs
-├── comp_ml_alg_fixed.ipynb  # ML Training Pipeline
-├── config.py                # Global settings (Kafka/HDFS/DB)
-├── kafka_producer.py        # HDFS to Kafka data streamer
-├── spark_consumer_sqlite.py # Spark Streaming & Inference engine
-├── requirements.txt         # Project dependencies
-└── normalize.py             # Feature normalization utilities
+├── src/
+│   ├── api/
+│   │   ├── __init__.py
+│   │   └── main.py                    # FastAPI application logic
+│   ├── ml/                            # ML models and utilities
+│   ├── comp_ml_alg_fixed.ipynb        # ML Training Pipeline
+│   ├── config.py                      # Global settings (Kafka/HDFS/DB)
+│   ├── kafka_producer.py              # HDFS to Kafka data streamer
+│   ├── spark_consumer_sqlite.py       # Spark Streaming & Inference engine
+│   ├── normalize.py                   # Feature normalization utilities
+│   └── test_db.py                     # Database testing utilities
+├── dataset/
+│   ├── NUSW-NB15_features.csv         # Dataset features
+│   ├── UNSW_NB15_testing-set.csv      # Test dataset
+│   ├── UNSW_NB15_training-set.csv     # Training dataset
+│   └── UNSW-NB15_*.csv                # Additional dataset files
+├── docker_configuration/              # Docker Compose and service configs
+│   ├── docker-compose.yml
+│   ├── hadoop.env
+│   ├── hive/
+│   │   └── Dockerfile
+│   └── spark/
+│       └── Dockerfile
+├── unsw_nb15_final_pipeline/          # Trained ML pipeline (Spark)
+├── spark-tmp/                         # Spark checkpoint & temp data
+├── jars/                              # External JAR dependencies
+├── requirements.txt                   # Python dependencies
+├── run.bat                            # Batch script runner (Windows)
+└── README.MD                          # Project documentation
 ```
 
 ---
