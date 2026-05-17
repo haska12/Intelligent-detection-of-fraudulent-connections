@@ -169,8 +169,8 @@ async def pbi_alerts(hours: int = MAX_HISTORY_H, limit: int = 10000):
 async def pbi_stats(hours: int = MAX_HISTORY_H):
     cutoff = _cutoff(hours)
     with get_db() as conn:
-        t = conn.execute("SELECT COUNT(*) AS cnt FROM alerts WHERE ts >= ?", (cutoff,)).fetchone()["cnt"]
-        a = conn.execute("SELECT COUNT(*) AS cnt FROM alerts WHERE ts >= ? AND is_attack=1", (cutoff,)).fetchone()["cnt"]
+        t = conn.execute("SELECT COUNT(*) AS cnt FROM events WHERE ts >= ?", (cutoff,)).fetchone()["cnt"]
+        a = conn.execute("SELECT COUNT(*) AS cnt FROM events WHERE ts >= ? AND is_attack=1", (cutoff,)).fetchone()["cnt"]
     return JSONResponse([{
         "total": t,
         "attacks": a,
@@ -182,18 +182,20 @@ async def pbi_stats(hours: int = MAX_HISTORY_H):
 
 @app.get("/api/powerbi/by_category")
 async def pbi_by_category(hours: int = MAX_HISTORY_H):
+
     cutoff = _cutoff(hours)
     with get_db() as conn:
         rows = conn.execute(f"""
             SELECT predicted_cat AS category,
-                   COUNT(*) AS total_count,
-                   SUM(is_attack) AS attack_count,
+                   COUNT(*) AS category_count,
+                   (SELECT COUNT(*) FROM events WHERE ts >= ?) AS total_events,
                    AVG(severity) AS avg_severity
-            FROM alerts
+            FROM events
             WHERE ts >= ?
             GROUP BY predicted_cat
-            ORDER BY attack_count DESC
-        """, (cutoff,)).fetchall()
+            ORDER BY category_count DESC
+        """, (cutoff, cutoff)).fetchall()
+    
     result = [dict(r) for r in rows]
     for r in result:
         r["color"] = ATTACK_LABELS.get(r["category"], {}).get("color", "#6b7280")
@@ -209,7 +211,7 @@ async def pbi_by_protocol(hours: int = MAX_HISTORY_H):
                    SUM(is_attack) AS attack_flows,
                    SUM(sbytes + dbytes) AS total_bytes,
                    AVG(dur) AS avg_duration
-            FROM alerts
+            FROM events
             WHERE ts >= ?
             GROUP BY proto
             ORDER BY total_flows DESC
@@ -227,7 +229,7 @@ async def pbi_timeseries(hours: int = MAX_HISTORY_H):
                    SUM(is_attack) AS attack_events,
                    COUNT(*) - SUM(is_attack) AS normal_events,
                    AVG(severity) AS avg_severity
-            FROM alerts
+            FROM events
             WHERE ts >= ?
             GROUP BY substr(ts, 1, 16)
             ORDER BY ts_minute ASC
@@ -242,13 +244,69 @@ async def pbi_by_severity(hours: int = MAX_HISTORY_H):
             SELECT severity,
                    COUNT(*) AS event_count,
                    SUM(is_attack) AS attack_count
-            FROM alerts
+            FROM events
             WHERE ts >= ?
             GROUP BY severity
             ORDER BY severity
         """, (cutoff,)).fetchall()
     return JSONResponse([dict(r) for r in rows])
 
+@app.get("/api/powerbi/live_ticker")
+async def pbi_live_ticker():
+    """Returns the top 20 most recent attacks for a live dashboard table grid"""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT ts, 
+                   predicted_cat AS category, 
+                   severity, 
+                   proto AS protocol,
+                   dur AS duration, 
+                   sbytes AS source_bytes, 
+                   dbytes AS dest_bytes
+            FROM events
+            WHERE is_attack = 1
+            ORDER BY ts DESC
+            LIMIT 20
+        """).fetchall()
+    
+    result = [dict(r) for r in rows]
+    for r in result:
+        r["color"] = ATTACK_LABELS.get(r["category"], {}).get("color", "#dc2626")
+    return JSONResponse(result)
+
+@app.get("/api/powerbi/network_load")
+async def pbi_network_load(hours: int = MAX_HISTORY_H):
+    """Correlates network throughput load with attack volumes over time"""
+    cutoff = _cutoff(hours)
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT substr(ts, 1, 16) AS ts_minute,
+                   SUM(sbytes + dbytes) AS total_network_bytes,
+                   AVG(sload) AS avg_source_load,
+                   SUM(is_attack) AS attack_count
+            FROM events
+            WHERE ts >= ?
+            GROUP BY ts_minute
+            ORDER BY ts_minute ASC
+        """, (cutoff,)).fetchall()
+    return JSONResponse([dict(r) for r in rows])
+
+@app.get("/api/powerbi/by_state")
+async def pbi_by_state(hours: int = MAX_HISTORY_H):
+    """Groups traffic by network connection state to isolate vulnerability patterns"""
+    cutoff = _cutoff(hours)
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT state,
+                   COUNT(*) AS total_flows,
+                   SUM(is_attack) AS attack_flows,
+                   AVG(severity) AS avg_severity
+            FROM events
+            WHERE ts >= ? AND state != '-' AND state != ''
+            GROUP BY state
+            ORDER BY total_flows DESC
+        """, (cutoff,)).fetchall()
+    return JSONResponse([dict(r) for r in rows])
 @app.get("/")
 async def root():
     return {
@@ -262,11 +320,14 @@ async def root():
             "by_severity": "/api/powerbi/by_severity",
         },
         "standard_endpoints": {
-            "health":      "/api/health",
-            "events":      "/api/events",
-            "events/recent":"/api/events/recent",
-            "alerts":      "/api/alerts",
-            "alerts/recent":"/api/alerts/recent",
-            "stats":       "/api/stats",
+            "health"           :"/api/health",
+            "events"           :"/api/events",
+            "events/recent"    :"/api/events/recent",
+            "alerts"           :"/api/alerts",
+            "alerts/recent"    :"/api/alerts/recent",
+            "stats"            :"/api/stats",
+            "live_ticker"      :"api/powerbi/live_ticker",
+            "network_load"     :"/api/powerbi/network_load",
+            "by_state"         :"/api/powerbi/by_state"
         },
     }

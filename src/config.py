@@ -18,8 +18,8 @@ HDFS_FEATURES_CSV  = "hdfs://namenode:9005/data/unsw/NUSW-NB15_features.csv"
 HDFS_TRAIN_CSV = "hdfs://namenode:9005/data/unsw/UNSW_NB15_training-set.csv"
 HDFS_TEST_CSV  = "hdfs://namenode:9005/data/unsw/UNSW_NB15_testing-set.csv"
 # ── Saved PySpark PipelineModel (on HDFS) ─────────────────────────────────
-MODEL_PATH         = os.getenv("MODEL_PATH", "hdfs://namenode:9005/ml/unsw_nb15_final_pipeline")
-#MODEL_PATH = "D:/dxc_project_full/unsw_nb15_final_pipeline"   # works
+#MODEL_PATH         = os.getenv("MODEL_PATH", "hdfs://namenode:9005/ml/unsw_nb15_final_pipeline")
+MODEL_PATH = "D:/dxc_project_full/unsw_nb15_final_pipeline"   # works
 
 
 # ── Hive settings ──────────────────────────────────────────────────────────

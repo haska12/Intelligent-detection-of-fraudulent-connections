@@ -84,7 +84,17 @@ docker compose down -v
 Build and start the infrastructure:
 
 ```bash
+
 docker compose up --build -d
+
+```
+
+start the infrastructure:
+
+```bash
+
+docker compose up  -d
+
 ```
 
 ### 2. Data Ingestion to HDFS
@@ -130,7 +140,7 @@ python kafka_producer.py --hdfs-path hdfs://namenode:9005/data/unsw/UNSW_NB15_tr
 
 ```bash
 conda activate bigdata
-python "pipline real\spark_consumer_sqlite.py"
+python "spark_consumer_sqlite.py"
 ```
 
 **Terminal 3: FastAPI** (Web Server)
@@ -162,14 +172,17 @@ All endpoints read from the SQLite database (`alerts.db`).
 
 ### Power BI‑Friendly Endpoints (JSON arrays)
 
-| Method | Endpoint                   | Description                                         |
-| ------ | -------------------------- | --------------------------------------------------- |
-| `GET`  | `/api/powerbi/alerts`      | All attacks within time window (default 2h)         |
-| `GET`  | `/api/powerbi/stats`       | Global stats: total, attacks, normal, attack rate   |
-| `GET`  | `/api/powerbi/by_category` | Attack counts per predicted category + avg severity |
-| `GET`  | `/api/powerbi/by_protocol` | Top 15 protocols by flow count, bytes, avg duration |
-| `GET`  | `/api/powerbi/timeseries`  | Minute‑level time series (total/attack/normal)      |
-| `GET`  | `/api/powerbi/by_severity` | Events grouped by severity (0‑5)                    |
+| Method | Endpoint                    | Description                                                                  |
+| ------ | --------------------------- | ---------------------------------------------------------------------------- |
+| `GET`  | `/api/powerbi/alerts`       | All attacks within time window (default 2h)                                  |
+| `GET`  | `/api/powerbi/stats`        | Global stats: total, attacks, normal, attack rate                            |
+| `GET`  | `/api/powerbi/by_category`  | Attack counts per predicted category + avg severity                          |
+| `GET`  | `/api/powerbi/by_protocol`  | Top 15 protocols by flow count, bytes, avg duration                          |
+| `GET`  | `/api/powerbi/timeseries`   | Minute‑level time series (total/attack/normal)                               |
+| `GET`  | `/api/powerbi/by_severity`  | Events grouped by severity (0‑5)                                             |
+| `GET`  | `api/powerbi/live_ticker`   | the top 20 most recent attacks for a live dashboard table grid               |
+| `GET`  | `/api/powerbi/network_load` | Correlates network throughput load with attack volumes over time             |
+| `GET`  | `/api/powerbi/by_state`     | Groups traffic by network connection state to isolate vulnerability patterns |
 
 **Parameter:** `?hours=2` (sliding window)
 
@@ -177,22 +190,31 @@ All endpoints read from the SQLite database (`alerts.db`).
 
 ## 🌐 API Documentation
 
-The FastAPI server provides detailed insights into network health.
+The FastAPI server provides detailed insights into network health and attack analytics.
 
 ### Standard Endpoints
 
-- `GET /`: API Overview.
-- `GET /api/health`: Database connection status and row counts.
-- `GET /api/events`: Paginated list of all traffic flows.
-- `GET /api/stats`: Aggregated metrics (Attack rate, protocol distribution, severity).
+- `GET /` : API overview with endpoint lists.
+- `GET /api/health` : Database connection status and row counts.
+- `GET /api/events` : Paginated list of all traffic flows (normal + attacks).
+- `GET /api/events/recent` : Most recent events (default 20).
+- `GET /api/alerts` : Paginated list of only attack events.
+- `GET /api/alerts/recent` : Most recent attacks (default 20).
+- `GET /api/stats` : Aggregated metrics over the last `hours` window (default 2h).
 
 ### Power BI-Optimized Endpoints
 
-These endpoints return flat JSON arrays for easy integration with visualization tools:
+Returns flat JSON arrays for easy Power BI and dashboard integration.
 
-- `GET /api/powerbi/timeseries`: Minute-by-minute traffic trends.
-- `GET /api/powerbi/by_category`: Breakdown of attack types (e.g., DoS, Fuzzer).
-- `GET /api/powerbi/by_severity`: Security event distribution by risk level.
+- `GET /api/powerbi/alerts` : All attacks within the requested time window (default 2h).
+- `GET /api/powerbi/stats` : Aggregate summary counts and attack rate.
+- `GET /api/powerbi/by_category` : Attack counts per predicted category plus average severity.
+- `GET /api/powerbi/by_protocol` : Top protocols by flow count, bytes, and average duration.
+- `GET /api/powerbi/timeseries` : Minute-level traffic trends.
+- `GET /api/powerbi/by_severity` : Events grouped by severity.
+- `GET /api/powerbi/live_ticker` : Top 20 most recent attacks for live dashboards.
+- `GET /api/powerbi/network_load` : Network throughput correlated with attack volumes.
+- `GET /api/powerbi/by_state` : Traffic grouped by connection state.
 
 ---
 

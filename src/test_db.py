@@ -18,7 +18,12 @@ cur.execute("""
     )
 """)
 conn.commit()
-cur.execute("SELECT COUNT(*) FROM alerts")
+cur.execute(f"""SELECT severity,
+                   COUNT(*) AS event_count,
+                   SUM(is_attack) AS attack_count
+            FROM alerts
+            GROUP BY severity
+            ORDER BY severity""")
 print("Row count:", cur.fetchone()[0])
 conn.close()
 print("Table created successfully at", ALERTS_DB)
