@@ -4,3 +4,14 @@ UNSW-NB15_2.csv
 # If these files live in dataset/ subfolder, ignore them there too
 /dataset/UNSW-NB15_1.csv
 /dataset/UNSW-NB15_2.csv
+
+# Spark streaming checkpoints and temporary runtime data
+spark-tmp/
+
+# Local SQLite databases containing your real-time tables
+*.db
+alerts.db
+# Standard Python compiled caches and environments
+__pycache__/
+*.pyc
+.env
