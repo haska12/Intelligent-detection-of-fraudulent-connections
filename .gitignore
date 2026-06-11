@@ -11,7 +11,13 @@ spark-tmp/
 # Local SQLite databases containing your real-time tables
 *.db
 alerts.db
+src\alerts.db
 # Standard Python compiled caches and environments
 __pycache__/
 *.pyc
 .env
+# Untrack the entire __pycache__ directory
+git rm --cached -r src/__pycache__/
+
+# Untrack the local SQLite database
+git rm --cached src/alerts.db

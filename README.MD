@@ -74,27 +74,28 @@ If running on Windows, you must provide the native Hadoop binaries:
 
 ### 1. Start Services
 
-If containers are already running and you need a fresh start:
+start / Activate the environment
 
 ```bash
 cd docker_configuration
+```
+
+If containers are already running and you need a fresh start:
+
+```bash
 docker compose down -v
 ```
 
 Build and start the infrastructure:
 
 ```bash
-
 docker compose up --build -d
-
 ```
 
 start the infrastructure:
 
 ```bash
-
 docker compose up  -d
-
 ```
 
 ### 2. Data Ingestion to HDFS
@@ -148,6 +149,13 @@ python "spark_consumer_sqlite.py"
 ```bash
 conda activate bigdata
 uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+or
+
+```bash
+conda activate bigdata
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
 ---
@@ -262,6 +270,24 @@ Modify `config.py` to adjust:
 - `KAFKA_BOOTSTRAP`: Broker addresses.
 - `ATTACK_LABELS`: Custom mapping for model output labels.
 - `ALERTS_DB`: Path to the SQLite storage file.
+
+---
+
+### Attack category severity levels
+
+The API classifies events by attack category and maps them to severity levels and colors.
+
+- 🔴 Severity 5 (Red/Purple) = Active Compromise & Disruption
+  - `Backdoors`, `DoS`, `Exploits`, `Shellcode`, `Worms`
+- 🟠 Severity 3 (Orange) = Targeted Malicious Activity
+  - `Analysis`, `Generic`
+- 🟡 Severity 2 (Yellow) = Probing & Noise
+  - `Fuzzers`, `Reconnaissance`
+- 🟢/⚫ Severity 0–1 (Green/Gray) = Baseline
+  - `Normal` = safe, standard traffic
+  - `Unknown` = unclassified/anomalous traffic, not an active threat
+
+This mapping is defined in `src/config.py` inside the `ATTACK_LABELS` dictionary.
 
 ---
 

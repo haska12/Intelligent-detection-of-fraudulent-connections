@@ -52,6 +52,7 @@ RAW_COLUMNS = [
 ]
 
 # Attack categories and their colours/severity (for API)
+
 ATTACK_LABELS = {
     "Normal":        {"color": "#22c55e", "severity": 0},
     "Fuzzers":       {"color": "#f59e0b", "severity": 2},
