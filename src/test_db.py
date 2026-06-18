@@ -1,7 +1,7 @@
 import sqlite3
 import os
 from config import ALERTS_DB
-
+#just test
 print("ALERTS_DB path:", ALERTS_DB)
 
 conn = sqlite3.connect(ALERTS_DB)
