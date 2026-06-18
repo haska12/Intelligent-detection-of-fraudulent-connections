@@ -1,4 +1,4 @@
-# Intelligent detection of fraudulent connections based on Big Data analytics, including a strong BI dimension
+﻿# Intelligent detection of fraudulent connections based on Big Data analytics, including a strong BI dimension
 
 End‑to‑end real‑time IDS using **PySpark**, **Kafka**, **SQLite**, and **FastAPI**. This project trains a Random Forest model on the UNSW‑NB15 dataset, streams network flows, and serves a REST API for real-time monitoring.
 

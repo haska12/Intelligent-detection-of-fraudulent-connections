@@ -23,13 +23,9 @@ import logging
 from datetime import datetime, timezone
 
 # ── Windows Hadoop env (adjust path if needed) ──────────────────────────────
-from config import HADOOP_bin_path,HADOOP_HOME_path
-"""
-os.environ['HADOOP_HOME'] = r"D:\hadoop-3.3.6"
-os.environ['PATH'] += os.pathsep + r"D:\hadoop-3.3.6\bin"
-"""
+from config import HADOOP_bin_path, HADOOP_HOME_path, PROJECT_ROOT
 
-os.environ['HADOOP_HOME'] =HADOOP_HOME_path
+os.environ['HADOOP_HOME'] = HADOOP_HOME_path
 os.environ['PATH'] += os.pathsep + HADOOP_bin_path
 
 os.environ.setdefault("PYSPARK_PYTHON",        sys.executable)
@@ -46,7 +42,7 @@ from config import (
     KAFKA_BOOTSTRAP, TOPIC_RAW,
     MODEL_PATH, TARGET_RAW, CAT_COLS,
     SPARK_TRIGGER_SECS, SPARK_MAX_OFFSETS, ATTACK_LABELS,
-    ALERTS_DB,
+    ALERTS_DB, HDFS_BASE_URI,
     HIVE_HOST, HIVE_PORT, HIVE_DATABASE, HIVE_TABLE,  # kept for reference, not used
 )
 
@@ -55,8 +51,18 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger(__name__)
 
 # ── Checkpoint paths ─────────────────────────────────────────────────────────
-CHECKPOINT_DIR    = "spark-tmp/checkpoint-main"
-SQLITE_CHECKPOINT = "spark-tmp/checkpoint-sqlite"
+CHECKPOINT_DIR = str(PROJECT_ROOT / "spark-tmp" / "checkpoint-main")
+SQLITE_CHECKPOINT = str(PROJECT_ROOT / "spark-tmp" / "checkpoint-sqlite")
+
+# HDFS Medallion paths. The stream writes continuously to Silver and Gold.
+MEDALLION_ENABLED = os.getenv("MEDALLION_ENABLED", "1").lower() not in ("0", "false", "no")
+MEDALLION_BASE = os.getenv("MEDALLION_BASE", f"{HDFS_BASE_URI}/datalake")
+SILVER_EVENTS_PATH = f"{MEDALLION_BASE}/silver/unsw/normalized/events_stream"
+GOLD_ALERTS_PATH = f"{MEDALLION_BASE}/gold/ids/alerts/alerts_stream"
+GOLD_KPI_PATH = f"{MEDALLION_BASE}/gold/ids/kpi/kpi_stream"
+GOLD_CATEGORY_PATH = f"{MEDALLION_BASE}/gold/ids/kpi/attacks_by_category_stream"
+GOLD_PROTOCOL_PATH = f"{MEDALLION_BASE}/gold/ids/kpi/attacks_by_protocol_stream"
+GOLD_SEVERITY_PATH = f"{MEDALLION_BASE}/gold/ids/kpi/attacks_by_severity_stream"
 
 # ── Numeric columns ──────────────────────────────────────────────────────────
 NUMERIC_COLS = [
@@ -181,6 +187,90 @@ def write_batch_to_sqlite(batch_df, epoch_id, label_index_map):
         conn.close()
 
 
+def _write_csv(df, path: str):
+    """Append one compact CSV folder per Spark micro-batch into HDFS."""
+    (df.coalesce(1)
+       .write
+       .mode("append")
+       .option("header", "true")
+       .csv(path))
+
+
+def write_batch_to_medallion(batch_df, epoch_id):
+    if not MEDALLION_ENABLED or batch_df.rdd.isEmpty():
+        return
+
+    processed_at = datetime.now(timezone.utc).isoformat()
+    batch = (batch_df
+             .withColumn("batch_id", F.lit(int(epoch_id)))
+             .withColumn("processed_at", F.lit(processed_at)))
+
+    silver_cols = [
+        "batch_id", "processed_at", "_stream_ts", "proto", "service", "state",
+        TARGET_RAW, "predicted_cat", "is_attack", "severity",
+        "dur", "sbytes", "dbytes", "sload", "dload",
+        "spkts", "dpkts", "ct_state_ttl",
+    ]
+    silver = batch.select(*[c for c in silver_cols if c in batch.columns])
+
+    alerts = silver.filter(F.col("is_attack") == 1)
+
+    kpi = batch.agg(
+        F.count("*").alias("total_events"),
+        F.sum("is_attack").alias("threats_detected"),
+        F.round(F.sum("is_attack") * F.lit(100.0) / F.count("*"), 2).alias("attack_rate"),
+        F.round(F.avg(F.when(F.col("is_attack") == 1, F.col("severity"))), 2).alias("avg_severity"),
+        F.round(F.avg("dur"), 4).alias("avg_duration"),
+    ).withColumn("batch_id", F.lit(int(epoch_id))).withColumn("processed_at", F.lit(processed_at))
+
+    by_category = (batch.filter(F.col("is_attack") == 1)
+                   .groupBy("predicted_cat")
+                   .agg(
+                       F.count("*").alias("event_count"),
+                       F.round(F.avg("severity"), 2).alias("avg_severity"),
+                       F.sum(F.col("sbytes") + F.col("dbytes")).alias("total_bytes"),
+                   )
+                   .withColumnRenamed("predicted_cat", "attack_category")
+                   .withColumn("batch_id", F.lit(int(epoch_id)))
+                   .withColumn("processed_at", F.lit(processed_at)))
+
+    by_protocol = (batch.groupBy("proto")
+                   .agg(
+                       F.count("*").alias("total_flows"),
+                       F.sum("is_attack").alias("attack_flows"),
+                       F.sum(F.col("sbytes") + F.col("dbytes")).alias("total_bytes"),
+                       F.round(F.avg("dur"), 4).alias("avg_duration"),
+                   )
+                   .withColumnRenamed("proto", "protocol")
+                   .withColumn("batch_id", F.lit(int(epoch_id)))
+                   .withColumn("processed_at", F.lit(processed_at)))
+
+    by_severity = (batch.groupBy("severity")
+                   .agg(
+                       F.count("*").alias("event_count"),
+                       F.sum("is_attack").alias("attack_count"),
+                   )
+                   .withColumn("batch_id", F.lit(int(epoch_id)))
+                   .withColumn("processed_at", F.lit(processed_at)))
+
+    try:
+        _write_csv(silver, SILVER_EVENTS_PATH)
+        if not alerts.rdd.isEmpty():
+            _write_csv(alerts, GOLD_ALERTS_PATH)
+        _write_csv(kpi, GOLD_KPI_PATH)
+        _write_csv(by_category, GOLD_CATEGORY_PATH)
+        _write_csv(by_protocol, GOLD_PROTOCOL_PATH)
+        _write_csv(by_severity, GOLD_SEVERITY_PATH)
+        log.info("Epoch %d - Medallion HDFS write complete (Silver + Gold)", epoch_id)
+    except Exception as exc:
+        log.error("Medallion HDFS write failed in epoch %d: %s", epoch_id, exc)
+
+
+def write_batch_outputs(batch_df, epoch_id, label_index_map):
+    write_batch_to_sqlite(batch_df, epoch_id, label_index_map)
+    write_batch_to_medallion(batch_df, epoch_id)
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  SHARED ROW BUILDER
 # ════════════════════════════════════════════════════════════════════════════
@@ -232,10 +322,10 @@ def _clear_dir(path: str, label: str):
 
 
 def build_spark():
-    tmp = os.path.join(os.getcwd(), "spark-tmp").replace("\\", "/")
+    tmp = str(PROJECT_ROOT / "spark-tmp").replace("\\", "/")
     os.makedirs(tmp, exist_ok=True)
 
-    jars_dir = "D:/dxc_project_full/jars"
+    jars_dir = str(PROJECT_ROOT / "jars").replace("\\", "/")
     jars = [
         f"file:///{jars_dir}/snappy-java-1.1.10.5.jar",
         f"file:///{jars_dir}/slf4j-api-2.0.7.jar",
@@ -246,11 +336,14 @@ def build_spark():
     ]
 
     return (SparkSession.builder
+        .master("local[2]")
         .appName("UNSW_NB15_StreamInference_SQLite")
         .config("spark.hadoop.dfs.client.use.datanode.hostname", "true")
         .config("spark.jars",                               ",".join(jars))
-        .config("spark.driver.host",                        "localhost")
+        .config("spark.driver.host",                        "127.0.0.1")
         .config("spark.driver.bindAddress",                 "127.0.0.1")
+        .config("spark.blockManager.port",                  "0")
+        .config("spark.driver.port",                        "0")
         .config("spark.driver.memory",                      "2g")
         .config("spark.executor.memory",                    "1g")
         .config("spark.sql.shuffle.partitions",             "2")
@@ -296,6 +389,13 @@ def main():
     label_index_map = {i: lbl for i, lbl in enumerate(model.stages[8].labels)}
     log.info("Label map: %s", label_index_map)
 
+    pred_map_expr = F.create_map(
+        *[x for item in label_index_map.items() for x in (F.lit(int(item[0])), F.lit(item[1]))]
+    )
+    severity_map_expr = F.create_map(
+        *[x for item in ATTACK_LABELS.items() for x in (F.lit(item[0]), F.lit(int(item[1].get("severity", 0))))]
+    )
+
     # 5. Kafka source
     raw = (spark.readStream.format("kafka")
            .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
@@ -325,13 +425,20 @@ def main():
         casted = casted.drop("label")
 
     # 8. ML inference
-    predictions = model.transform(casted)
+    predictions = (model.transform(casted)
+                   .withColumn("prediction_idx", F.col("prediction").cast("int"))
+                   .withColumn("predicted_cat", pred_map_expr[F.col("prediction_idx")])
+                   .withColumn(
+                       "is_attack",
+                       F.when(F.col("predicted_cat").isin("Normal", "Unknown"), F.lit(0)).otherwise(F.lit(1))
+                   )
+                   .withColumn("severity", severity_map_expr[F.col("predicted_cat")].cast("int")))
     keep = (
         CAT_COLS
         + [TARGET_RAW, "_stream_ts"]
         + ["dur", "sbytes", "dbytes", "sload", "dload",
            "spkts", "dpkts", "ct_state_ttl"]
-        + ["prediction", "probability"]
+        + ["prediction", "predicted_cat", "is_attack", "severity"]
     )
     output = predictions.select(*[c for c in keep if c in predictions.columns])
 
@@ -339,7 +446,7 @@ def main():
     query = (output.writeStream
              .trigger(processingTime=f"{SPARK_TRIGGER_SECS} seconds")
              .foreachBatch(
-                 lambda df, eid: write_batch_to_sqlite(df, eid, label_index_map)
+                 lambda df, eid: write_batch_outputs(df, eid, label_index_map)
              )
              .option("checkpointLocation", SQLITE_CHECKPOINT)
              .start())

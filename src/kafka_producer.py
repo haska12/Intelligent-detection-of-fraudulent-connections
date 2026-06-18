@@ -7,6 +7,7 @@ each row as JSON to Kafka topic `unsw-nb15-raw`.
 """
 import argparse
 import json
+import os
 import sys
 import time
 import logging
@@ -16,12 +17,20 @@ from typing import Optional
 import pandas as pd
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
+
+os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
+if os.environ.get("SPARK_HOME") and not os.path.exists(
+    os.path.join(os.environ["SPARK_HOME"], "jars")
+):
+    os.environ.pop("SPARK_HOME", None)
+
 from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
 
 from config import (
     KAFKA_BOOTSTRAP, TOPIC_RAW, PRODUCER_DELAY_SEC,
-    HDFS_RAW_CSV, HDFS_FEATURES_CSV
+    HDFS_RAW_CSV, HDFS_FEATURES_CSV,
+    HADOOP_bin_path, HADOOP_HOME_path,
 )
 from normalize import normalize_unsw_raw   # pandas version for final step
 
@@ -59,14 +68,7 @@ def read_csv_from_hdfs(hdfs_raw_path: str, hdfs_features_path: Optional[str] = N
     - If headerless (e.g. UNSW-NB15_1.csv), assigns names from features CSV.
     Then applies normalization and returns a pandas DataFrame ready for streaming.
     """
-    import os
-    from config import HADOOP_bin_path,HADOOP_HOME_path
-    """
-    os.environ['HADOOP_HOME'] = r"D:\hadoop-3.3.6"
-    os.environ['PATH'] += os.pathsep + r"D:\hadoop-3.3.6\bin"
-    """
-
-    os.environ['HADOOP_HOME'] =HADOOP_HOME_path
+    os.environ['HADOOP_HOME'] = HADOOP_HOME_path
     os.environ['PATH'] += os.pathsep + HADOOP_bin_path
 
     spark = SparkSession.builder \

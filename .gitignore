@@ -21,3 +21,29 @@ git rm --cached -r src/__pycache__/
 
 # Untrack the local SQLite database
 git rm --cached src/alerts.db
+
+/README copy.MD
+
+# Editor / OS settings
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Frontend dependencies and build artifacts
+dashboard/node_modules/
+dashboard/dist/
+
+# Python backend dependencies and cache
+__pycache__/
+*.pyc
+.venv/
+env/
+
+# Data and large files
+dataset/
+spark-tmp/
+jars/
+
+# Environment secrets (if you create them later)
+.env
+.env.*
